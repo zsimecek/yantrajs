@@ -67,7 +67,26 @@ internal static class YantraJsGenerator
             return null;
 
         Func<object, YantraJsState, object>? cloner = (Func<object, YantraJsState, object>?)YantraJsCache.GetOrAddClass(obj.GetType(), t => GenerateCloner(t, true));
-        return cloner is null ? obj : cloner(obj, new YantraJsState());
+
+        if (cloner is null)
+        {
+            return obj;
+        }
+
+        YantraJsState state = new YantraJsState();
+        object result = cloner(obj, state);
+
+        if (state.IterativeMode)
+        {
+            while (state.TryDequeueWork(out (object from, object to) item))
+            {
+                Type t = item.from.GetType();
+                var clonerTo = (Func<object, object, YantraJsState, object>)YantraJsCache.GetOrAddDeepClassTo(t, tp => YantraExprGen.GenClonerInternal(tp, true));
+                clonerTo(item.from, item.to, state);
+            }
+        }
+
+        return result;
     }
 
     internal static object? CloneClassInternal(object? obj, YantraJsState jsState)
@@ -82,6 +101,22 @@ internal static class YantraJsGenerator
         if (YantraJsCache.IsTypeIgnored(objType))
         {
             return null;
+        }
+
+        if (jsState.IterativeMode)
+        {
+            object? known = jsState.GetKnownRef(obj);
+            if (known is not null)
+            {
+                return known;
+            }
+
+            object? shallow = CloneClassShallowAndTrack(obj, jsState);
+            if (shallow is not null)
+            {
+                jsState.EnqueueWork(obj, shallow);
+            }
+            return shallow;
         }
 
         Func<object, YantraJsState, object>? cloner = (Func<object, YantraJsState, object>?)YantraJsCache.GetOrAddClass(objType, t => GenerateCloner(t, true));

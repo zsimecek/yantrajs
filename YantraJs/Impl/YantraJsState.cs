@@ -7,6 +7,11 @@ internal sealed class YantraJsState
     private YantraDictionary? loops;
     private readonly object[] baseFromTo = new object[6];
     private int idx;
+    private int totalKnownRefs;
+    private Queue<(object from, object to)>? workQueue;
+
+    internal const int IterativeThreshold = 1000;
+    public bool IterativeMode { get; private set; }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? GetKnownRef(object from)
@@ -30,11 +35,41 @@ internal sealed class YantraJsState
             baseFromTo[idx] = from;
             baseFromTo[idx + 3] = to;
             idx++;
+            totalKnownRefs++;
+            if (!IterativeMode && totalKnownRefs >= IterativeThreshold)
+            {
+                IterativeMode = true;
+            }
             return;
         }
 
         loops ??= new YantraDictionary();
         loops.Insert(from, to);
+        totalKnownRefs++;
+        if (!IterativeMode && totalKnownRefs >= IterativeThreshold)
+        {
+            IterativeMode = true;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void EnqueueWork(object from, object to)
+    {
+        workQueue ??= new Queue<(object from, object to)>();
+        workQueue.Enqueue((from, to));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryDequeueWork(out (object from, object to) item)
+    {
+        if (workQueue is not null && workQueue.Count > 0)
+        {
+            item = workQueue.Dequeue();
+            return true;
+        }
+
+        item = default;
+        return false;
     }
 
     private sealed class YantraDictionary
